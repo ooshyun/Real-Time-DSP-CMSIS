@@ -1,0 +1,24 @@
+default:
+  name:
+
+setting:
+  in_type: "device"
+  in_device: 3 # "MacBook Pro Microphone"
+  in_file: "./data/audio/wav/sin_1k_stereo_tone_16bit_400ms_-40dBFS.wav"
+  # in_file: "./data/audio/wav/WhiteNoise_Full_-40_dBFS_44k_PCM16_LR.wav"
+  in_channel: 2
+
+  out_type: "file"
+  out_device: 4 # "Soundflower (2ch)"
+  out_file: "./test/result/Olive_max_sco_mic1.wav"
+  out_channel: 2
+  
+  sample_rate: 44100
+  
+params:
+  sample_rate: 44100
+  duration: 10
+  window_size: 256
+  window_type: "hann"
+  overlap: 25
+  qformat: 31 # 15(Q1.15), 31(Q1.31), 0 (float32) 7(Q1.7, Not implmented)  

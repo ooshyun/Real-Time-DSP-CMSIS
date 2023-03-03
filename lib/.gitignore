@@ -1,0 +1,6 @@
+**
+!.gitignore
+!cmsis-dsp-makefile/
+!*.md
+!*.m
+!*.sh
