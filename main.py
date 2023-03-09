@@ -3,8 +3,8 @@ import argparse
 from omegaconf import OmegaConf
 from src.audio import(
     device_info,
-    get_in_streamer,
-    get_out_streamer,
+    get_stream_in,
+    get_stream_out,
 )
 from src.streamer import Streamer
 

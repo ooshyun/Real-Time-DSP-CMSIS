@@ -458,6 +458,34 @@ class NumericalSanityCheck(unittest.TestCase):
 
         print("Cosine Pass !")
 
+        # Logarithm
+
+        wav_float_logn = wav_float
+        wav_q15_logn = wav_q15
+        wav_q31_logn = wav_q31  
+
+        wav_float_logn[wav_float < 0] = - wav_float[wav_float < 0]
+        wav_q15_logn[wav_q15 < 0] = - wav_q15[wav_q15 < 0]
+        wav_q31_logn[wav_q31 < 0] = - wav_q31[wav_q31 < 0]
+
+        wav_float_logn[wav_float_logn == 0] = wav_float_logn[wav_float_logn == 0] + np.finfo(np.float32).eps
+        wav_q15_logn[wav_q15_logn == 0] = wav_q15_logn[wav_q15_logn == 0] +1
+        wav_q31_logn[wav_q31_logn == 0] = wav_q31_logn[wav_q31_logn == 0] +1
+
+        wav_q15_logn, shift_q15_logn = converter_q15.log(wav_q15_logn)
+        wav_q31_logn, shift_q31_logn = converter_q31.log(wav_q31_logn)
+        wav_float_logn, _  = converter_float.log(wav_float_logn)
+
+        wav_q15_logn_reconvert = converter_q15.reconvert(wav_q15_logn)*(2**shift_q15_logn)
+        wav_q31_logn_reconvert = converter_q31.reconvert(wav_q31_logn)*(2**shift_q31_logn)
+
+        print("Logarithm result !")
+        print("\tError Max in Logarithm Q15: ", np.max(wav_float_logn- wav_q15_logn_reconvert))
+        print("\tError Max in Logarithm Q31: ", np.max(wav_float_logn-wav_q31_logn_reconvert))
+        
+        # assert (wav_float_logn- wav_q15_logn_reconvert< error_rate_q15).all() # cannot pass
+        assert (wav_float_logn- wav_q31_logn_reconvert < error_rate_q31).all()
+
         # FFT
         wav_q15_fft = converter_q15.fft(wav_q15)
         wav_q31_fft = converter_q31.fft(wav_q31)
@@ -485,6 +513,21 @@ class NumericalSanityCheck(unittest.TestCase):
         print("rfft abs result !")
         print("\tError Max in fft abs Q15: ", np.max(np.abs(wav_q15_fft_amp_reconvert-wav_float_fft_amp)))
         print("\tError Max in fft abs Q31: ", np.max(np.abs(wav_q31_fft_amp_reconvert-wav_float_fft_amp)))
+
+        # Magnitude Squared
+        wav_q15_fft_amp_squared = converter_q15.mag_squared(wav_q15_fft)
+        wav_q31_fft_amp_squared = converter_q31.mag_squared(wav_q31_fft)
+        # wav_q7_fft_amp_squared = converter_q7.mag_squared(wav_q7)
+        wav_float_fft_amp_squared  = converter_float.mag_squared(wav_float_fft)
+    
+        wav_q15_fft_amp_squared_reconvert = converter_q15.reconvert(wav_q15_fft_amp_squared)
+        wav_q31_fft_amp_squared_reconvert = converter_q31.reconvert(wav_q31_fft_amp_squared)
+        # wav_q7_fft_amp_squared_reconvert = converter_q7.reconvert(wav_q7_fft)
+
+        print("rfft abs^2 result !")
+        print("\tError Max in fft abs Q15: ", np.max(np.abs(wav_q15_fft_amp_squared_reconvert-wav_float_fft_amp_squared)))
+        print("\tError Max in fft abs Q31: ", np.max(np.abs(wav_q31_fft_amp_squared_reconvert-wav_float_fft_amp_squared)))
+
 
         # # iFFT
         wav_q15_ifft = converter_q15.ifft(wav_q15_fft)

@@ -2,23 +2,72 @@ default:
   name:
 
 setting:
-  in_type: "device"
-  in_device: 3 # "MacBook Pro Microphone"
-  in_file: "./data/audio/wav/sin_1k_stereo_tone_16bit_400ms_-40dBFS.wav"
+  # in_type: "device"
+  in_device: 2 # "MacBook Pro Microphone"
+  in_type: "file"
+  # in_file: "./data/audio/wav/sin_1k_stereo_tone_16bit_400ms_-40dBFS.wav"
   # in_file: "./data/audio/wav/WhiteNoise_Full_-40_dBFS_44k_PCM16_LR.wav"
+  # in_file: "./data/audio/wav/S06001_mix_CH2.wav"
+  # in_file: "./data/audio/wav/Olive_max_sco_mic1_noisy_0.wav"
+  # in_file: "./data/audio/wav/Olive_max_sco_mic1_noisy_1.wav"
+  # in_file: "./data/audio/wav/sin_1k_stereo_tone_16bit_400ms_-40dBFS_SNR_10.wav"
+  in_file: "./data/audio/wav/S06001_mix_CH2_BGNoise.wav"
+  # in_file: "./data/audio/wav/nr_vad_baseline/olive_rec_NRwVAD_input.wav"
   in_channel: 2
 
-  out_type: "file"
+  fft_channel: 1 # currently support mono channel in fft
+
+  # out_type: "device"
   out_device: 4 # "Soundflower (2ch)"
-  out_file: "./test/result/Olive_max_sco_mic1.wav"
+  out_type: "file"
+  # out_file: "./test/result/Olive_max_sco_mic1_only_noise.wav"
+  # out_file: "./test/result/Olive_max_sco_mic1.wav"
+  # out_file: "./test/result/S06001_mix_CH2_denoised.wav"
+  # out_file: "./test/result/Olive_max_sco_mic1_denoised_1.wav"
+  out_file: "./test/result/result.wav"
   out_channel: 2
   
-  sample_rate: 44100
+  sample_rate: 48000
   
 params:
-  sample_rate: 44100
-  duration: 10
+  sample_rate: 48000
+  duration: -1 # 9.5 20
   window_size: 256
   window_type: "hann"
   overlap: 25
-  qformat: 31 # 15(Q1.15), 31(Q1.31), 0 (float32) 7(Q1.7, Not implmented)  
+  # qformat: 31 # 15(Q1.15), 31(Q1.31), 0 (float32) 7(Q1.7, Not implmented)  
+  qformat: 0
+
+nr:
+  #  GAIN_MIN, SNR_MIN, VAD_THRESHOLD 
+  #  nr mode 1 ( 0.70795 , 0.6309576 , 0.75 ),
+  #  nr mode 2 ( 0.50119 , 0.6309576 , 0.19999999 ),
+  #  nr mode 3 ( 0.31622 , 0.6309576 , 0.19999999 )] 
+
+  # gain_min: 0.70795
+  # snr_min: 0.6309576
+  # vad_threshold: 0.75
+
+  # gain_min: 0.50119
+  # snr_min: 0.6309576
+  # vad_threshold: 0.19999999
+
+  # gain_min: 0.31622
+  # snr_min: 0.6309576
+  # vad_threshold: 0.19999999
+
+  gain_min: 0.31622776601683794
+  snr_min: 0.1
+  vad_threshold: 0.15
+
+  # snr_qformat: 20
+  snr_qformat:
+  
+  max_nframe_noise: 300
+  vad_only: False
+
+  max_nframe_statistic: 300
+  std_th: 1.2
+  gain: 0
+
+

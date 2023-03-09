@@ -2,8 +2,9 @@
 !lib/
 !src/
 !test/
+!log
 !.gitignore
 !*.py
-!*.ipynb
+# !*.ipynb
 !*.md
 !LICENSE

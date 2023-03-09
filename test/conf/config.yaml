@@ -7,6 +7,8 @@ setting:
   in_file: ""
   in_channel: 2
 
+  fft_channel: 1
+
   out_type: "device"
   out_device: 6 # "Soundflower (2ch)"
   out_file: ""
@@ -20,4 +22,16 @@ params:
   window_size: 256
   window_type: "hann" 
   overlap: 25
-  qformat: 31 # 15(Q1.15), 31(Q1.31), 0 (float32) 7(Q1.7, Not implmented)  
+  qformat: 31 
+  # 7(Q1.7, Not implmented)  
+  # 15(Q1.15, currently overflow/underflow in process), 
+  # 31(Q1.31), 
+  # 0 (float32)
+
+nr:
+  gain_min: 0.50119
+  snr_min: 0.6309576
+  vad_threshold: 0.19999999
+  max_nframe_noise: 300
+  snr_qformat:
+  vad_only: False
