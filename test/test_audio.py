@@ -107,11 +107,11 @@ class AudioSanityCheck(unittest.TestCase):
         """
         python -m unittest -v test.test_audio.AudioSanityCheck.test_read_file_stream
         """
-        in_streamer = audio.get_in_streamer(sample_rate=44100,
+        stream_in = audio.get_stream_in(sample_rate=44100,
                             file_path=PATH_TEST_SINE_INT16_TONE,
                             type="file")
 
-        in_streamer.start()
+        stream_in.start()
 
         first = True
         num_frames = 1
@@ -126,7 +126,7 @@ class AudioSanityCheck(unittest.TestCase):
             try:
                 length = total_length if first else stride
                 first = False
-                frame, overflow = in_streamer.read(length)
+                frame, overflow = stream_in.read(length)
                 
                 print(length, frame[..., :3, :], frame.shape, overflow)
                 # underflow = stream_out.write(frame) # numpy array
@@ -137,22 +137,22 @@ class AudioSanityCheck(unittest.TestCase):
                 print("Stopping")
                 break            
 
-        in_streamer.stop()
+        stream_in.stop()
 
     def test_write_file_stream(self):
         """
         python -m unittest -v test.test_audio.AudioSanityCheck.test_write_file_stream
         """
         outfile_path = "./test/data/test_write_file_stream.wav"
-        in_streamer = audio.get_in_streamer(sample_rate=44100, 
+        stream_in = audio.get_stream_in(sample_rate=44100, 
                             file_path=PATH_TEST_SINE_INT16_TONE,
                             type="file")
-        out_streamer = audio.get_out_streamer(sample_rate=44100,
+        stream_out = audio.get_stream_out(sample_rate=44100,
                             file_path=outfile_path,
                             type="file")
 
-        in_streamer.start()
-        out_streamer.start()
+        stream_in.start()
+        stream_out.start()
 
         first = True
         num_frames = 1
@@ -167,10 +167,10 @@ class AudioSanityCheck(unittest.TestCase):
             try:
                 length = total_length if first else stride
                 first = False
-                frame, overflow = in_streamer.read(length)
+                frame, overflow = stream_in.read(length)
                 
                 print(frame[:3, :], frame.shape, overflow)
-                underflow = out_streamer.write(frame) # numpy array
+                underflow = stream_out.write(frame) # numpy array
                 if np.all(frame[..., 0] == 0):
                     zero_count +=1
                 time +=1
@@ -178,8 +178,8 @@ class AudioSanityCheck(unittest.TestCase):
                 print("Stopping")
                 break            
 
-        in_streamer.stop()
-        out_streamer.stop()
+        stream_in.stop()
+        stream_out.stop()
 
     def test_get_mic_streamer(self):
         """
@@ -187,16 +187,16 @@ class AudioSanityCheck(unittest.TestCase):
         """
         outfile_path = "./test/data/test_get_mic_streamer.wav"
         
-        in_streamer = audio.get_in_streamer(sample_rate=44100, 
+        stream_in = audio.get_stream_in(sample_rate=44100, 
                                             device=2,
                                             type="device")
         
-        out_streamer = audio.get_out_streamer(sample_rate=44100,
+        stream_out = audio.get_stream_out(sample_rate=44100,
                             file_path=outfile_path,
                             type="file")
 
-        in_streamer.start()
-        out_streamer.start()
+        stream_in.start()
+        stream_out.start()
 
         first = True
         num_frames = 1
@@ -211,10 +211,10 @@ class AudioSanityCheck(unittest.TestCase):
             try:
                 length = total_length if first else stride
                 first = False
-                frame, overflow = in_streamer.read(length)
+                frame, overflow = stream_in.read(length)
                 
                 print(zero_count, frame[:3, ...], frame.shape, overflow)
-                underflow = out_streamer.write(frame) # numpy array
+                underflow = stream_out.write(frame) # numpy array
                 if np.all(frame[..., 0] == 0):
                     zero_count +=1
                 time +=1
@@ -222,22 +222,22 @@ class AudioSanityCheck(unittest.TestCase):
                 print("Stopping")
                 break            
 
-        in_streamer.stop()
-        out_streamer.stop()
+        stream_in.stop()
+        stream_out.stop()
 
     def test_get_spk_streamer(self):
         """
         python -m unittest -v test.test_audio.AudioSanityCheck.test_get_spk_streamer
         """
-        in_streamer = audio.get_in_streamer(sample_rate=44100, 
+        stream_in = audio.get_stream_in(sample_rate=44100, 
                             file_path=PATH_TEST_SINE_INT16_TONE,
                             type="file")
-        out_streamer = audio.get_out_streamer(sample_rate=44100,
+        stream_out = audio.get_stream_out(sample_rate=44100,
                                               device=6, # check port using sounddevice.query_device
                                               type="device",
                                               )
-        in_streamer.start()
-        out_streamer.start()
+        stream_in.start()
+        stream_out.start()
 
         first = True
         num_frames = 1
@@ -252,9 +252,9 @@ class AudioSanityCheck(unittest.TestCase):
             try:
                 length = total_length if first else stride
                 first = False
-                frame, overflow = in_streamer.read(length)
+                frame, overflow = stream_in.read(length)
                 print(zero_count, frame[:3, ...], frame.shape, frame.dtype, overflow)
-                underflow = out_streamer.write(frame) # numpy array
+                underflow = stream_out.write(frame) # numpy array
                 if np.all(frame[..., 0] == 0):
                     zero_count +=1
                 time +=1
@@ -262,8 +262,8 @@ class AudioSanityCheck(unittest.TestCase):
                 print("Stopping")
                 break            
 
-        in_streamer.stop()
-        out_streamer.stop()
+        stream_in.stop()
+        stream_out.stop()
         
     def test_print_device_info(self):
         """
@@ -371,3 +371,22 @@ class AudioSanityCheck(unittest.TestCase):
                                 bit_depth=bit_depth,
                                 type="ffmpeg")
 
+    def test_add_noise(self):
+        """
+        python -m unittest -v test.test_audio.AudioSanityCheck.test_add_noise
+        """        
+        from src.audio import add_noise, read_audio, write_audio
+
+        signal, sr = read_audio("./data/audio/wav/S06001_mix_CH2.wav")
+        noise, _ = read_audio("./data/audio/wav/device_sco_mic1_only_noise.wav")
+
+        mix = add_noise(signal=signal, noise=noise, snr=10, power=2., version=1)
+        
+        import matplotlib.pyplot as plt
+
+        # plt.plot(signal)
+        # plt.plot(mix)
+        # # plt.plot(signal-mix)
+        # plt.show()
+
+        # write_audio("./test/result/test_noise_add.wav", mix, sr, subtype="PCM_32")

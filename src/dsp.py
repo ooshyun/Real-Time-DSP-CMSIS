@@ -1,6 +1,7 @@
 import numpy as np
 import typing as tp
 import warnings
+
 from cmsisdsp import(
     # Q15 Math
     arm_float_to_q15,
@@ -14,6 +15,7 @@ from cmsisdsp import(
     arm_divide_q15,
     arm_sqrt_q15,
     arm_cos_q15,
+    arm_vlog_q15,
     # Q15 DFT
     arm_rfft_instance_q15,
     arm_rfft_init_q15,
@@ -34,6 +36,7 @@ from cmsisdsp import(
     arm_divide_q31,
     arm_sqrt_q31,
     arm_cos_q31,
+    arm_vlog_q31,
     # Q31 DFT
     arm_rfft_instance_q31,
     arm_rfft_init_q31,
@@ -41,7 +44,6 @@ from cmsisdsp import(
     # arm_cfft_instance_q31,
     # arm_cfft_init_q31,
     # arm_cfft_q31,      # also have radix 2, 4 version
-    arm_cmplx_mag_q31,
     # Q7 Math
     arm_float_to_q7,
     arm_q7_to_float,
@@ -57,8 +59,14 @@ from cmsisdsp import(
     # arm_rfft_instance_q7,
     # arm_rfft_init_q7,
     # arm_rfft_q7,
-    # arm_cmplx_mag_q7,   
     # Floating Math
+    # Complexf
+    arm_cmplx_mag_squared_q15,
+    arm_cmplx_mag_squared_q31,
+    arm_cmplx_mag_q15,
+    arm_cmplx_mag_q31,
+    # arm_cmplx_mag_q7,   
+
     arm_cos_f32,
 
     # Filtering
@@ -107,36 +115,43 @@ class ConverterFloatToQFormat(object):
                 ):
         assert qformat in (0, 7, 15, 31), f"Q format is possible only q7, q15, q31"
 
-        print(qformat, window_size)
-
         self.qformat = qformat
         self.window_type = window_type
         self.window_size = window_size
-        self.norm_factor = int(window_size//2)
+        self.norm_factor = int(window_size)
         self.ifft_factor = int(np.log2(window_size))
         self.window = get_window_arm(name=window_type, 
                                     window_size=window_size,
                                     qformat=qformat)
+
+        log2_factor = np.log(2.)
+        
         if qformat == 15:
             self.fft_function = get_fft_func_arm(window_size, qformat, ifft_flag=0)
             self.ifft_function = get_fft_func_arm(window_size, qformat, ifft_flag=1)
+            self.log2_factor = self.convert(log2_factor/16)
+
         elif qformat == 31:
             self.fft_function = get_fft_func_arm(window_size, qformat, ifft_flag=0)
             self.ifft_function = get_fft_func_arm(window_size, qformat, ifft_flag=1)
+            self.log2_factor = self.convert(log2_factor/32)
         elif self.qformat == 7:
             warnings.warn(f"Q7 format do not implment fft computation yet...")
             self.fft_function = None
             self.ifft_function = None
+            self.log2_factor = None
         else:
             self.fft_function = np.fft.rfft 
             self.ifft_function = np.fft.irfft 
+            self.log2_factor = None
+
 
     def set_window_type(self, window_size, window_type):
         self.window_size = window_size
         self.window = get_window_arm(name=window_type, 
                                     window_size=window_size,
                                     qformat=self.qformat)
-        self.norm_factor = int(window_size//2)
+        self.norm_factor = int(window_size)
         self.ifft_factor = int(np.log2(window_size))
         
     def set_qformat(self, qformat):
@@ -235,6 +250,10 @@ class ConverterFloatToQFormat(object):
             return a-b
 
     def mult(self, a: np.ndarray, b: np.ndarray):
+        # test file: test/test_cmsis_dsp_math.ipynb
+        # Q1.31 * Q1.31 -> Q  1.62 -> Q  1.31
+        # Q8.24 * Q8.24 -> Q 16.48 -> Q 16.16
+        # Q8.24 * Q1.31 -> Q  8.56 -> Q  8.24
         assert a.shape == b.shape, f"variable shape should be same..."
         shape = a.shape
         if self.qformat:
@@ -339,8 +358,7 @@ class ConverterFloatToQFormat(object):
     def fft(self, frame:np.ndarray):
         """
         Return: normalized FFT, Q 1.31
-        
-        Noramlized value 1 for fft + Q8.24 to Q1.31
+        Noramlized value 0.5 for fft + Q8.24 to Q1.31
         """
         assert len(frame.shape)==2 and frame.shape[-2] == self.window_size, f"Window size should match with data"
         nchannel = frame.shape[-1]
@@ -350,20 +368,20 @@ class ConverterFloatToQFormat(object):
         if self.qformat == 15:
             assert frame.dtype == np.int16, f"variable should be int16"
             for ch in range(nchannel):
-                result[..., ch] = arm_rfft_q15(fft_funcion, frame[..., ch])[:self.window_size+2] << 1
+                result[..., ch] = arm_rfft_q15(fft_funcion, frame[..., ch])[:self.window_size+2]
         elif self.qformat == 31:
             assert frame.dtype == np.int32, f"variable should be int32"
             for ch in range(nchannel):
-                result[..., ch] = arm_rfft_q31(fft_funcion, frame[..., ch])[:self.window_size+2] << 1
+                result[..., ch] = arm_rfft_q31(fft_funcion, frame[..., ch])[:self.window_size+2]
         elif self.qformat == 7:
             raise NotImplementedError(f"Q7 cannot use fft yet...")
             assert frame.dtype == np.int8, f"variable should be int8"
             for ch in range(nchannel):
-                result[..., ch] = arm_rfft_q7(fft_funcion, frame[..., ch])[:self.window_size+2] << 1
+                result[..., ch] = arm_rfft_q7(fft_funcion, frame[..., ch])[:self.window_size+2]
         else:
-            fft_result = fft_funcion(a=frame, n=self.window_size, axis=-2)
-            result[...,0::2, :] = fft_result.real/self.norm_factor
-            result[...,1::2, :] = fft_result.imag/self.norm_factor
+            fft_result = fft_funcion(a=frame, n=self.window_size, axis=-2)/self.norm_factor
+            result[...,0::2, :] = fft_result.real
+            result[...,1::2, :] = fft_result.imag
   
         return result
 
@@ -392,9 +410,37 @@ class ConverterFloatToQFormat(object):
             result = np.sqrt(frame[0::2, :]**2 + frame[1::2, :]**2)
         return result
 
+    def mag_squared(self, frame:np.ndarray):
+        """
+        Return: Q 1.31 (Q 3.29 -> Q 1.31)
+        """
+        assert len(frame.shape) == 2, f"Frame for magnitude shape should be (nsample, nchannel)"
+        nchannel = frame.shape[-1]
+        result = np.zeros(shape=(self.window_size//2+1, nchannel), dtype=frame.dtype)
+
+        if self.qformat == 15:
+            assert frame.dtype == np.int16, f"variable should be int16"
+            for ch in range(nchannel):
+                result[:, ch] = arm_cmplx_mag_squared_q15(frame[..., ch]) << 2
+            # result += 1
+        elif self.qformat == 31:
+            assert frame.dtype == np.int32, f"variable should be int32"
+            for ch in range(nchannel):
+                result[:, ch] = arm_cmplx_mag_squared_q31(frame[..., ch]) << 2
+            # result += 1 # prevent 0
+        elif self.qformat == 7:
+            raise NotImplementedError(f"Q7 cannot use fft yet...")
+            assert frame.dtype == np.int8, f"variable should be int8"
+            for ch in range(nchannel):
+                result[:, ch] = cmsis_arm_cmplx_mag_squared_q7(frame[..., ch]) << 2
+            # result += 1
+        else:
+            result = frame[0::2, :]**2 + frame[1::2, :]**2
+        return result
+    
     def ifft(self, fft_frame):
         """
-            Noramlized value 1 -> 0.5 for ifft
+            Before ifft, fft value normalized to 0.5 
         """
         assert len(fft_frame.shape)==2 and fft_frame.shape[-2] == (self.window_size//2+1)*2, f"Window size should match with data"
     
@@ -405,12 +451,12 @@ class ConverterFloatToQFormat(object):
         if self.qformat == 15:
             assert fft_frame.dtype == np.int16, f"variable should be int16"
             for ch in range(nchannel):
-                    result[..., ch] = arm_rfft_q15(ifft_function, fft_frame[..., ch]>>1) << self.ifft_factor 
+                    result[..., ch] = arm_rfft_q15(ifft_function, fft_frame[..., ch]) << self.ifft_factor 
 
         elif self.qformat == 31:
             assert fft_frame.dtype == np.int32, f"variable should be int32"
             for ch in range(nchannel):
-                    result[..., ch] = arm_rfft_q31(ifft_function, fft_frame[..., ch]>>1) << self.ifft_factor 
+                    result[..., ch] = arm_rfft_q31(ifft_function, fft_frame[..., ch]) << self.ifft_factor 
 
         elif self.qformat == 7:
             raise NotImplementedError(f"Q7 cannot use ifft yet...")
@@ -450,6 +496,33 @@ class ConverterFloatToQFormat(object):
         arm_linear_interp_q31
         arm_bilinear_interp_q31
         """
+
+    def log(self, frame, qformat=0):
+        assert (frame > 0).all(), "Logarithm should have positive number..."
+
+        shape = frame.shape
+        
+        if self.qformat == 15:
+            result = arm_vlog_q15(frame.flatten())
+            shift = 4
+        elif self.qformat == 31:
+            result = arm_vlog_q31(frame.flatten())
+            shift = 5
+        elif self.qformat == 7:
+            raise NotImplementedError(f"Q format 7 did not implment Logarithm yet...")
+        else:
+            result = np.log(frame)
+            shift = 0
+        
+        if qformat:
+            # Q n.m, log(X*2^{n}) = log(X) + nlog2
+            for _ in range(qformat-1):
+                result = self.add(result, np.broadcast_to(self.log2_factor, shape=result.shape))
+        
+        if self.qformat:
+            result = result.reshape(shape)
+            
+        return result, shift
 
     def normalized_window(self, frame):
         # TODO for 50 overlap

@@ -1,41 +1,72 @@
 import tqdm
+import time
 import warnings
 import numpy as np
 from omegaconf import DictConfig
 
 from .audio import (
-    get_in_streamer, 
-    get_out_streamer,
+    get_stream_in, 
+    get_stream_out,
+    convert_audio_channels,
 )
 
 from .dsp import ConverterFloatToQFormat
 
+from .time_process import(
+    directionality_time,
+    apply_gain,
+)
 
-def directionality_time(frame):
-    if len(frame.shape) > 1 and frame.shape[-1] > 1:
-        frame = np.mean(frame, axis=-1, keepdims=True)
+from .frequency_process import(
+    dummy_process_fft,
+    NRVAD,
+    NRSpectralGate,
+)
 
-    return frame
+import logging
+import logging.config
+import yaml
 
-def record_fft(frame):
-    return frame
-
+with open('./src/conf/debug.yaml', 'r') as f:
+    log_config = yaml.safe_load(f.read())
+    log_config['handlers']['file']['filename'] = log_config['handlers']['file']['root'] + f'/{__name__.replace(".", "_")}.log'
+    del log_config['handlers']['file']['root']
+    logging.config.dictConfig(log_config)
+    
+logger = logging.getLogger(__name__)
 
 class Streamer(object):
     def __init__(self, config: DictConfig):
+
+        self.config = config
+
+        self.dsp_converter = ConverterFloatToQFormat(**config.params)
+
         self.pre_time_func = [
                             # directionality_time, 
                             ]
-        self.freq_func = [
-                            record_fft, 
-                        ]
-        self.post_time_func = []
+        
+        self.nr_vad = NRVAD(config=config, 
+                             qconverter=self.dsp_converter)
+        self.nr_spectralgate = NRSpectralGate(config, qconverter=self.dsp_converter)
 
-        self.config = config
-        self.dsp_converter = ConverterFloatToQFormat(**config.params)
+        self.freq_func = [
+                            # dummy_process_fft, 
+                            # self.nr_vad.forward,
+                            self.nr_spectralgate.forward,
+                            # apply_gain(gain=12, nsample=config.params.window_size+2, qconverter=self.dsp_converter),
+                        ]
+        
+        self.post_time_func = [
+            # apply_gain(gain=9, qconverter=self.dsp_converter),
+            # convert_audio_channels,
+        ]
+
+        self.flag = False
+
 
     def loop(self):
-        print("\tPress Ctrl + C if want to stop...")
+        logger.info("\tPress Ctrl + C if want to stop...")
 
         assert self.config.params.overlap in (50, 25), f"Overlap can support only 25%, 50%"
         sample_rate = self.config.params.sample_rate
@@ -45,7 +76,7 @@ class Streamer(object):
         stride = int(frame_length*overlap/100)
         Qformat = self.config.params.qformat
         
-        first  = False
+        first = False
         frame_count = 0
 
         format_converter = self.dsp_converter 
@@ -64,41 +95,61 @@ class Streamer(object):
         else:
             dtype = np.float32
 
-        in_streamer = get_in_streamer(**self.config.setting)
-        out_streamer = get_out_streamer(**self.config.setting)
+        stream_in = get_stream_in(**self.config.setting)
+        stream_out = get_stream_out(**self.config.setting)
 
         if overlap == 25:
-            window_sum = np.ones(shape=(frame_length, 2), dtype=np.float32)*2/3
+            window_sum = np.ones(shape=(frame_length, 1), dtype=np.float32)*2/3
             window_sum = format_converter.convert(window_sum)
 
         if process_freq:
-            pre_overlap_frame_buffer = np.zeros(shape=(frame_length, 2), dtype=dtype)
-            post_overlap_frame_buffer = np.zeros(shape=(frame_length, 2), dtype=dtype)
-
-
-        if Qformat:
-            fft_qformat = int(np.log2(frame_length))
-            # ifft_window = format_converter.shift(format_converter.window, -fft_qformat)
-            # window_sum = format_converter.shift(window_sum, -fft_qformat)
-        else:
-            fft_qformat = None
+            pre_overlap_frame_buffer = np.zeros(shape=(frame_length, 1), dtype=dtype)
+            post_overlap_frame_buffer = np.zeros(shape=(frame_length, 1), dtype=dtype)
             
-        in_streamer.start()
-        out_streamer.start()
+        stream_in.start()
+        stream_out.start()
 
-        total_frame = int((duration*sample_rate)//stride) if duration else False
+        if duration > 0:
+            total_frame = int((duration*sample_rate)//stride)
+        elif duration < 0 and self.config.setting.in_type == "file":
+            total_frame = int((stream_in.length)//stride)
+        else:
+            total_frame = False
 
-        warnings.warn(f"There's no setting to stop a record...")
-        tmp = []
+
+        sr_ms = sample_rate / 1000
+        stride_ms = stride / sr_ms
+        
+        total_time = 0
+        current_time = 0
+        frame_count_time = 0
+        last_log_time = 0
+        log_delta = 10
+        
+        if total_frame: logger.info(f"Ready to process audio, total lag: {duration/ sample_rate / 1000:.1f}ms.")
+        if not total_frame: warnings.warn(f"There's no setting to stop a record...")
+
         while(frame_count < total_frame if total_frame else True):
             try:
-                frame, overflow = in_streamer.read(stride)
+                begin = time.time()
 
-                print(f"\t Input frame {frame.shape, frame.dtype} Stride {stride}, {frame[4:8, 0]}, {overflow}")
+                if current_time > last_log_time + log_delta:
+                    last_log_time = current_time
+                    tpf = total_time / frame_count_time * 1000  # sec to ms
+                    rtf = tpf / stride_ms                       # frame per stride
+                    logger.info(f"time per frame: {tpf:.1f}ms, RTF: {rtf:.1f}")
+                    total_time = 0
+                    frame_count_time = 0
+                                    
+                current_time += stride_ms # length / model.sample_rate                                   
+                
+                frame, overflow = stream_in.read(stride)
+
+                logger.debug(f"\t Input frame {frame.shape, frame.dtype} Stride {stride}, {frame[4:8, 0]}, {overflow}")
                 
                 frame = format_converter.convert(frame)
 
-                print(f"\t Format cvt frame {frame.shape, frame.dtype}, {frame[4:8, 0]}")
+                logger.debug(f"\t Format cvt frame {frame.shape, frame.dtype}, {frame[4:8, 0]}")
 
                 if first:
                     if frame.shape[-1] > 2: warnings.warn(f"Currently supported until stereo channel")
@@ -107,7 +158,7 @@ class Streamer(object):
                     for time_func in pre_time_func_list:
                         frame = time_func(frame)
 
-                print(f"\t pre_process_time frame {frame.shape, frame.dtype}, {frame[4:8, 0]}")
+                logger.debug(f"\t pre_process_time frame {frame.shape, frame.dtype}, {frame[4:8, 0]}")
 
                 if process_freq:
                     # overlap and add
@@ -117,65 +168,68 @@ class Streamer(object):
                     # fft
                     fft_frame = format_converter.fft(format_converter.windowing(pre_overlap_frame_buffer))
 
-                    print(f"\t process_freq fft frame {fft_frame.shape, fft_frame.dtype}, {fft_frame[4:8, 0]}")
+                    logger.debug(f"\t process_freq fft frame {fft_frame.shape, fft_frame.dtype}, {fft_frame[4:8, 0]}")
 
                     # fft process
                     for freq_func in freq_func_list:
                         fft_frame = freq_func(fft_frame) 
 
-                    # overlap and add
-                    ifft_frame = format_converter.ifft(fft_frame)
-                
-                    if not first:
-                        post_overlap_frame_buffer = np.roll(post_overlap_frame_buffer, -stride, axis=-2)
-                        post_overlap_frame_buffer[..., -stride:, :] = 0
+                    if self.flag:
+                        frame = fft_frame[..., :stride, :]
+                    else:
+                        # overlap and add
+                        ifft_frame = format_converter.ifft(fft_frame)
                     
-                    overlap_buffer = format_converter.windowing(frame=ifft_frame)
-                    if overlap == 50:
-                        # [TODO] Normalized window
-                        raise NotImplementedError
-                    if overlap == 25:
-                        overlap_buffer = format_converter.mult(overlap_buffer, window_sum) # Q1.15, underflow in here
+                        if not first:
+                            post_overlap_frame_buffer = np.roll(post_overlap_frame_buffer, -stride, axis=-2)
+                            post_overlap_frame_buffer[..., -stride:, :] = 0
                         
-                    post_overlap_frame_buffer += overlap_buffer
-                                    
-                    frame = post_overlap_frame_buffer[..., :stride, :]
-                        
-                    print(f"\t After process_freq ifft frame {ifft_frame.shape, ifft_frame.dtype}, {ifft_frame[4:8, 0]}")
-                    print(f"\t After process_freq frame {frame.shape, frame.dtype}, {frame[4:8, 0]}")
+                        overlap_buffer = format_converter.windowing(frame=ifft_frame)
+                        if overlap == 50:
+                            # [TODO] Normalized window
+                            raise NotImplementedError
+                        if overlap == 25:
+                            overlap_buffer = format_converter.mult(overlap_buffer, window_sum) # Q1.15, underflow in here
+                            
+                        post_overlap_frame_buffer += overlap_buffer
+                                        
+                        frame = post_overlap_frame_buffer[..., :stride, :]
+                            
+                        logger.debug(f"\t After process_freq ifft frame {ifft_frame.shape, ifft_frame.dtype}, {ifft_frame[4:8, 0]}")
+                        logger.debug(f"\t After process_freq frame {frame.shape, frame.dtype}, {frame[4:8, 0]}")
 
 
                 if post_process_time:
-                    for time_func in post_process_time:
+                    for time_func in post_time_func_list:
                         frame = time_func(frame)
 
-                print(f"\t After post process frame {frame.shape, frame.dtype}, {frame[4:8, 0]}")
+                logger.debug(f"\t After post process frame {frame.shape, frame.dtype}, {frame[4:8, 0]}")
 
                 frame = format_converter.reconvert(frame)
 
-                print(f"\t After reconversion frame {frame.shape, frame.dtype}, {frame[4:8, 0]}")
+                logger.debug(f"\t After reconversion frame {frame.shape, frame.dtype}, {frame[4:8, 0]}")
 
-                underflow = out_streamer.write(frame)
+                underflow = stream_out.write(frame)
 
-                print(f"\t Underflow {underflow}, frame {frame_count} total_frame {total_frame}")
-                
+                logger.info(f"\t Underflow {underflow}, frame {frame_count} total_frame {total_frame}")
+                # logger.info(f"\t Underflow {underflow}, frame {frame_count} total_frame {total_frame}")
+                logger.debug(f"-"*30)
+            
                 frame_count +=1
+                total_time += time.time() - begin
+                frame_count_time += 1
+                
                 first = False
-                print(f"-"*30)
-
                 # if frame_count == 30:break
                 
             except KeyboardInterrupt:
-                print("Stopping")
+                logger.info("Stopping")
                 break      
 
-        in_streamer.stop()
-        out_streamer.stop()
+        stream_in.stop()
+        stream_out.stop()
 
-        # file = self.config.setting.in_file.split("/")[-1]
-        # # file = "./test/result/Hifi2-mini-vs-CMSIS/CMSIS/fft/out_FFT_Int32_" + file.split(".")[0] + ".npy"
-        # file = "./test/result/Hifi2-mini-vs-CMSIS/CMSIS/fft/out_FFT_Float_" + file.split(".")[0] + ".npy"
-        # print(file)
-        # tmp = np.concatenate(tmp, axis=0)
-        # np.save(file, arr=tmp, allow_pickle=True)
+        # for key, values in self.nr_func.profile.items():
+        #     logger.info(f"\t {key}")
+        #     logger.info(f"{len(values)}")
         

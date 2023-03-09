@@ -27,7 +27,7 @@ from pathlib import Path
 from .utils import bold
 import sys
 
-def get_in_streamer(sample_rate, in_device=0, in_file="", in_type="file", *args, **kwarg):
+def get_stream_in(sample_rate, in_device=0, in_file="", in_type="file", *args, **kwarg):
     """
     type: "file", "device"  
     """
@@ -39,7 +39,7 @@ def get_in_streamer(sample_rate, in_device=0, in_file="", in_type="file", *args,
         raise ValueError(f"There's no {in_type} type streamer")
 
 
-def get_out_streamer(sample_rate, out_device=0, out_file="", out_type="file", *args, **kwarg):
+def get_stream_out(sample_rate, out_device=0, out_file="", out_type="file", *args, **kwarg):
     """
     type: "file", "device"  
     """
@@ -236,7 +236,10 @@ class FileOutputStream(object):
         for i in range(size):
             wav[i] = self.buffer.get_nowait()
 
-        wav = np.concatenate(wav, axis=-2)
+        if size == 0:
+            wav = np.ones(shape=(1, 1), dtype=np.float32)
+        else:
+            wav = np.concatenate(wav, axis=-2)
 
         if wav.shape[0] == 1:
             wav = np.squeeze(wav, axis=-1)
@@ -284,9 +287,13 @@ def read_audio(path:str, sample_rate:int = None) -> Tuple[np.ndarray, int]:
     """If want to read pcm file itself, then use import scipy.io.wavfile as wavfile
         (soundfile use c++ library)
     """    
-    return sf.read(
-        file=path, 
-        )
+    # return sf.read(
+    #     file=path, 
+    #     )
+    return librosa.load(
+        path=path,
+        sr = sample_rate
+    )
 
 
 def write_audio(path:str, data:np.ndarray, sample_rate:int, subtype="PCM_16"):
@@ -342,6 +349,44 @@ def get_buffer(shape: tuple, buffer: np.ndarray=None):
         else:
             pass
     return buffer
+
+def add_noise(signal:np.ndarray, noise:np.ndarray, snr: int, power: float=2., version: int=0):
+    """
+    Version 0. SNR base
+        https://github.com/Sato-Kunihiko/audio-SNR/blob/master/create_mixed_audio_file.py
+
+    Version 1. Background Noise
+    """
+    assert noise.shape[0] >= signal.shape[0], f"Noise should be longer than signal..."
+
+    max_dtype = np.finfo(signal.dtype).max
+    min_dtype = np.finfo(signal.dtype).min
+
+    start = np.random.randint(0, noise.shape[0]-signal.shape[0])
+    noise_divided = noise[start:start+signal.shape[0]]
+    
+    signal_rms = np.sqrt(np.power(signal, power))
+    noise_rms = np.sqrt(np.power(noise_divided, power))
+
+    if version ==0:
+        adjusted_noise_rms = signal_rms / 10**(snr/20)
+        
+        mix = signal + adjusted_noise_rms/noise_rms * noise_divided
+
+        if mix.max(axis=0) > max_dtype or mix.min(axis=0) < min_dtype:
+            if mix.max(axis=0) >= abs(mix.min(axis=0)): 
+                reduction_rate = max_dtype / mix.max(axis=0)
+            else :
+                reduction_rate = min_dtype / mix.min(axis=0)
+            mix = mix * (reduction_rate)
+    elif version == 1:
+        mix = np.zeros_like(noise_rms)
+        mix[noise_rms > signal_rms] = noise_divided[noise_rms > signal_rms]
+        mix[noise_rms <= signal_rms] = signal[noise_rms <= signal_rms] + noise_divided[noise_rms <= signal_rms]
+        
+    return mix
+
+
 
 
 def make_tone(amplitude:int, duration:int, frequency:int, phase:float = 0, sample_rate:int=44100, type="sin"):

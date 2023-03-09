@@ -14,7 +14,6 @@ def bold(text):
     """
     return colorize(text, "1")
 
-
 def available_serial_ports():
     ports = ['COM%s' % (i + 1) for i in range(10)]
     result = []

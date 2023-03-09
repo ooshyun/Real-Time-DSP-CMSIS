@@ -1,13 +1,16 @@
 """
 def func(frame, format_converter: ConverterFloatToQFormat)
 """
+import numpy as np
 from .dsp import ConverterFloatToQFormat
+from omegaconf import OmegaConf
 
-class Equalizer():
-    ...
+from .nr import NRVAD, NRSpectralGate
+
+EPS_NUMPY = np.finfo(np.float32).eps
 
 class NALNL2():
     ...
 
-class NRVAD():
-    ...
+def dummy_process_fft(frame):
+    return frame
